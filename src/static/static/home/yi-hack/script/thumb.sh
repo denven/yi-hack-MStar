@@ -89,21 +89,28 @@ checkFiles ()
 		BASE_NAME=$(lbasename "$file")
 		if [ ! -f $BASE_NAME.jpg ]; then
 			minimp4_yi -t 1 $file $BASE_NAME.h26x
-			if [ $? -lt 0 ]; then
+			if [ $? -ne 0 ]; then
 				logAdd "[ERROR] checkFiles: demux mp4 FAILED - [${file}]."
-				return 0
+				rm -f $BASE_NAME.h26x
 			fi
 			imggrabber -f $BASE_NAME.h26x -r low -w > $BASE_NAME.jpg
-			if [ $? -lt 0 ]; then
-				logAdd "[ERROR] checkFiles: create jpg FAILED - [${file}]."
+			if [ $? -ne 0 ]; then
+				logAdd "[ERROR] checkFiles: create jpg FAILED - [${file}]. Using fallback.jpg."
 				rm -f $BASE_NAME.h26x
-				return 0
+				rm -f $BASE_NAME.jpg
+				cp /home/yi-hack/etc/fallback.jpg $BASE_NAME.jpg
 			fi
 			rm -f $BASE_NAME.h26x
 			logAdd "[INFO] checkFiles: createThumb SUCCEEDED - [${file}]."
 			sync
 		else
-			logAdd "[INFO] checkFiles: ignore file [${file}] - already present."
+			#logAdd "[INFO] checkFiles: ignore file [${file}] - already present."
+			if [ -s $BASE_NAME.jpg ]; then
+				logAdd "[INFO] checkFiles: ignore file [${file}] - already present."
+			else
+				rm -f $BASE_NAME.jpg
+				logAdd "[DEBUG] checkFiles: ignore file [${file}] - already present but ZERO, deleted for next try"
+			fi
 		fi
 		#
 	done
@@ -122,19 +129,17 @@ serviceMain ()
 	# sleep 10
 	while (true); do
 		# Check if folder exists.
-		if [ ! -d "${FOLDER_TO_WATCH}" ]; then 
+		if [ ! -d "${FOLDER_TO_WATCH}" ]; then
 			mkdir -p "${FOLDER_TO_WATCH}"
 		fi
-		# 
+		#
 		# Ensure correct file permissions.
 		if ( ! lstat "${FOLDER_TO_WATCH}/" | grep -q "^755$" ); then
 			logAdd "[WARN] Adjusting folder permissions to 0755 ..."
 			chmod -R 0755 "${FOLDER_TO_WATCH}"
 		fi
 		#
-#		if [[ $(get_config FTP_UPLOAD) == "yes" ]] ; then
-			checkFiles
-#		fi
+		checkFiles
 		#
 		if [ "${1}" = "--one-shot" ]; then
 			break

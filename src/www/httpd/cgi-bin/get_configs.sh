@@ -66,6 +66,11 @@ if [ "$CONF_TYPE" == "system" ] ; then
     printf "\"%s\":\"%s\",\n"  "TIMEZONE" "$(cat /etc/TZ)"
 fi
 
+if [ "$CONF_TYPE" == "camera" ] ; then
+    HOMEVER=$(cat /home/homever)
+    printf "\"%s\":\"%s\",\n"  "HOMEVER" "$HOMEVER"
+fi
+
 # Empty values to "close" the json
 printf "\"%s\":\"%s\"\n"  "NULL" "NULL"
 

@@ -29,6 +29,26 @@ start_buffer()
     ipc_cmd -x
 }
 
+log()
+{
+    if [ "$DEBUG_LOG" == "yes" ]; then
+        echo $1 >> /tmp/sd/hack_debug.log
+
+        if [ "$2" == "1" ]; then
+            echo "" >> /tmp/sd/hack_debug.log
+            ps >> /tmp/sd/hack_debug.log
+            echo "" >> /tmp/sd/hack_debug.log
+            free >> /tmp/sd/hack_debug.log
+            echo "" >> /tmp/sd/hack_debug.log
+        fi
+    fi
+}
+
+DEBUG_LOG=$(get_config DEBUG_LOG)
+rm -f /tmp/sd/hack_debug.log
+
+log "Starting system.sh"
+
 export PATH=$PATH:/home/base/tools:/home/yi-hack/bin:/home/yi-hack/sbin:/tmp/sd/yi-hack/bin:/tmp/sd/yi-hack/sbin
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/lib:/home/yi-hack/lib:/tmp/sd/yi-hack/lib
 
@@ -76,17 +96,20 @@ fi
 
 $YI_HACK_PREFIX/script/check_conf.sh
 
-hostname -F /etc/hostname
+hostname -F $YI_HACK_PREFIX/etc/hostname
 
 if [[ x$(get_config USERNAME) != "x" ]] ; then
+    log "Setting username and password"
     USERNAME=$(get_config USERNAME)
     PASSWORD=$(get_config PASSWORD)
     ONVIF_USERPWD="user=$USERNAME\npassword=$PASSWORD"
-    echo "/:$USERNAME:$PASSWORD" > /tmp/httpd.conf
+    echo "/onvif::" > /tmp/httpd.conf
+    echo "/:$USERNAME:$PASSWORD" >> /tmp/httpd.conf
 fi
 
 PASSWORD_MD5='$1$$qRPK7m23GJusamGpoGLby/'
 if [[ x$(get_config SSH_PASSWORD) != "x" ]] ; then
+    log "Setting SSH password"
     SSH_PASSWORD=$(get_config SSH_PASSWORD)
     PASSWORD_MD5="$(echo "${SSH_PASSWORD}" | mkpasswd --method=MD5 --stdin)"
 fi
@@ -99,15 +122,12 @@ case $(get_config RTSP_PORT) in
     ''|*[!0-9]*) RTSP_PORT=554 ;;
     *) RTSP_PORT=$(get_config RTSP_PORT) ;;
 esac
-case $(get_config ONVIF_PORT) in
-    ''|*[!0-9]*) ONVIF_PORT=80 ;;
-    *) ONVIF_PORT=$(get_config ONVIF_PORT) ;;
-esac
 case $(get_config HTTPD_PORT) in
-    ''|*[!0-9]*) HTTPD_PORT=8080 ;;
+    ''|*[!0-9]*) HTTPD_PORT=80 ;;
     *) HTTPD_PORT=$(get_config HTTPD_PORT) ;;
 esac
 
+log "Starting yi processes" 1
 if [[ $(get_config DISABLE_CLOUD) == "no" ]] ; then
     (
         if [ $(get_config RTSP_AUDIO) != "no" ]; then
@@ -120,6 +140,7 @@ if [[ $(get_config DISABLE_CLOUD) == "no" ]] ; then
         cd /home/app
         killall dispatch
         LD_PRELOAD=/home/yi-hack/lib/ipc_multiplex.so ./dispatch &
+        sleep 2
         LD_LIBRARY_PATH="/home/yi-hack/lib:/lib:/home/lib:/home/ms:/home/app/locallib" ./rmm &
         sleep 4
         dd if=/tmp/audio_fifo of=/dev/null bs=1 count=8192
@@ -138,6 +159,16 @@ if [[ $(get_config DISABLE_CLOUD) == "no" ]] ; then
     )
 else
     (
+        while read -r line
+        do
+            echo "127.0.0.1    $line" >> /etc/hosts
+        done < $YI_HACK_PREFIX/script/blacklist/url
+
+        while read -r line
+        do
+            route add -host $line reject
+        done < $YI_HACK_PREFIX/script/blacklist/ip
+
         if [ $(get_config RTSP_AUDIO) != "no" ]; then
             touch /tmp/audio_fifo.requested
             touch /tmp/audio_fifo_mono_8khz.requested
@@ -148,6 +179,7 @@ else
         cd /home/app
         killall dispatch
         LD_PRELOAD=/home/yi-hack/lib/ipc_multiplex.so ./dispatch &
+        sleep 2
         LD_LIBRARY_PATH="/home/yi-hack/lib:/lib:/home/lib:/home/ms:/home/app/locallib" ./rmm &
         sleep 4
         dd if=/tmp/audio_fifo of=/dev/null bs=1 count=8192
@@ -157,26 +189,16 @@ else
         if [[ $(get_config REC_WITHOUT_CLOUD) == "yes" ]] ; then
             ./mp4record &
         fi
-
-        echo "127.0.0.1    api.eu.xiaoyi.com" >> /etc/hosts
-        echo "127.0.0.1    api.us.xiaoyi.com" >> /etc/hosts
-        echo "127.0.0.1    api.xiaoyi.com.tw" >> /etc/hosts
-        echo "127.0.0.1    log.eu.xiaoyi.com" >> /etc/hosts
-        echo "127.0.0.1    log.us.xiaoyi.com" >> /etc/hosts
-        echo "127.0.0.1    log.xiaoyi.com.tw" >> /etc/hosts
-        route add -host 47.251.52.14 reject
-        route add -host 47.90.241.246 reject
-        route add -host 47.74.131.238 reject
-        route add -host 47.74.208.204 reject
-        route add -host 47.90.203.190 reject
-        route add -host 47.254.18.99 reject
-        route add -host 47.88.59.209 reject
-        route add -host 47.90.240.160 reject
-        route add -host 47.74.255.9 reject
+        ./cloud &
     )
 fi
 
+log "Yi processes started successfully" 1
+
+[ -f /etc/TZ ] && export TZ=`cat /etc/TZ`
+
 if [[ $(get_config HTTPD) == "yes" ]] ; then
+    log "Starting http"
     httpd -p $HTTPD_PORT -h $YI_HACK_PREFIX/www/ -c /tmp/httpd.conf
 fi
 
@@ -185,6 +207,7 @@ if [[ $(get_config TELNETD) == "yes" ]] ; then
 fi
 
 if [[ $(get_config FTPD) == "yes" ]] ; then
+    log "Starting ftp"
     if [[ $(get_config BUSYBOX_FTPD) == "yes" ]] ; then
         tcpsvd -vE 0.0.0.0 21 ftpd -w &
     else
@@ -193,17 +216,21 @@ if [[ $(get_config FTPD) == "yes" ]] ; then
 fi
 
 if [[ $(get_config SSHD) == "yes" ]] ; then
+    log "Starting sshd"
     dropbear -R
 fi
 
 if [[ $(get_config NTPD) == "yes" ]] ; then
+    log "Starting ntp"
     # Wait until all the other processes have been initialized
     sleep 5 && ntpd -p $(get_config NTP_SERVER) &
 fi
 
+log "Starting mqtt services"
+mqttv4 &
 if [[ $(get_config MQTT) == "yes" ]] ; then
-    mqttv4 &
     mqtt-config &
+    /home/yi-hack/script/conf2mqtt.sh &
 fi
 
 sleep 5
@@ -214,10 +241,6 @@ fi
 
 if [[ $HTTPD_PORT != "80" ]] ; then
     D_HTTPD_PORT=:$HTTPD_PORT
-fi
-
-if [[ $ONVIF_PORT != "80" ]] ; then
-    D_ONVIF_PORT=:$ONVIF_PORT
 fi
 
 if [[ $(get_config ONVIF_WM_SNAPSHOT) == "yes" ]] ; then
@@ -233,6 +256,7 @@ if [[ $(get_config SNAPSHOT_LOW) == "yes" ]] ; then
 fi
 
 if [[ $(get_config RTSP) == "yes" ]] ; then
+    log "Starting rtsp"
     RTSP_DAEMON="rRTSPServer"
     RTSP_AUDIO_COMPRESSION=$(get_config RTSP_AUDIO)
     NR_LEVEL=$(get_config RTSP_AUDIO_NR_LEVEL)
@@ -311,18 +335,23 @@ SERIAL_NUMBER=$(dd status=none bs=1 count=20 skip=661 if=/tmp/mmap.info | tr '\0
 HW_ID=$(dd status=none bs=1 count=4 skip=661 if=/tmp/mmap.info | tr '\0' '0' | cut -c1-4)
 
 if [[ $(get_config ONVIF) == "yes" ]] ; then
-    ONVIF_SRVD_CONF="/tmp/onvif_srvd.conf"
+    log "Starting onvif"
 
-    echo "pid_file=/var/run/onvif_srvd.pid" > $ONVIF_SRVD_CONF
-    echo "model=Yi Hack" >> $ONVIF_SRVD_CONF
+    ONVIF_SRVD_CONF="/tmp/onvif_simple_server.conf"
+
+    echo "model=Yi Hack" > $ONVIF_SRVD_CONF
     echo "manufacturer=Yi" >> $ONVIF_SRVD_CONF
     echo "firmware_ver=$YI_HACK_VER" >> $ONVIF_SRVD_CONF
     echo "hardware_id=$HW_ID" >> $ONVIF_SRVD_CONF
     echo "serial_num=$SERIAL_NUMBER" >> $ONVIF_SRVD_CONF
     echo "ifs=wlan0" >> $ONVIF_SRVD_CONF
-    echo "port=$ONVIF_PORT" >> $ONVIF_SRVD_CONF
-    echo "scope=onvif://www.onvif.org/Profile/S" >> $ONVIF_SRVD_CONF
+    echo "port=$HTTPD_PORT" >> $ONVIF_SRVD_CONF
+    echo "scope=onvif://www.onvif.org/Profile/Streaming" >> $ONVIF_SRVD_CONF
     echo "" >> $ONVIF_SRVD_CONF
+    if [ ! -z $ONVIF_USERPWD ]; then
+        echo -e $ONVIF_USERPWD >> $ONVIF_SRVD_CONF
+        echo "" >> $ONVIF_SRVD_CONF
+    fi
     if [ ! -z $ONVIF_PROFILE_0 ]; then
         echo "#Profile 0" >> $ONVIF_SRVD_CONF
         echo -e $ONVIF_PROFILE_0 >> $ONVIF_SRVD_CONF
@@ -331,10 +360,6 @@ if [[ $(get_config ONVIF) == "yes" ]] ; then
     if [ ! -z $ONVIF_PROFILE_1 ]; then
         echo "#Profile 1" >> $ONVIF_SRVD_CONF
         echo -e $ONVIF_PROFILE_1 >> $ONVIF_SRVD_CONF
-        echo "" >> $ONVIF_SRVD_CONF
-    fi
-    if [ ! -z $ONVIF_USERPWD ]; then
-        echo -e $ONVIF_USERPWD >> $ONVIF_SRVD_CONF
         echo "" >> $ONVIF_SRVD_CONF
     fi
 
@@ -349,13 +374,14 @@ if [[ $(get_config ONVIF) == "yes" ]] ; then
         echo "move_preset=/home/yi-hack/bin/ipc_cmd -p %t" >> $ONVIF_SRVD_CONF
     fi
 
-    onvif_srvd --conf_file $ONVIF_SRVD_CONF
+    onvif_simple_server --conf_file $ONVIF_SRVD_CONF
 
     if [[ $(get_config ONVIF_WSDD) == "yes" ]] ; then
-        wsdd --pid_file /var/run/wsdd.pid --if_name wlan0 --type tdn:NetworkVideoTransmitter --xaddr "http://%s$D_ONVIF_PORT" --scope "onvif://www.onvif.org/name/Unknown onvif://www.onvif.org/Profile/Streaming"
+        wsd_simple_server --pid_file /var/run/wsd_simple_server.pid --if_name wlan0 --xaddr "http://%s$D_HTTPD_PORT/onvif/device_service" -m yi_hack -n Yi
     fi
 fi
 
+log "Starting crontab"
 # Add crontab
 CRONTAB=$(get_config CRONTAB)
 FREE_SPACE=$(get_config FREE_SPACE)
@@ -363,7 +389,7 @@ mkdir -p /var/spool/cron/crontabs/
 if [ ! -z "$CRONTAB" ]; then
     echo -e "$CRONTAB" > /var/spool/cron/crontabs/root
 fi
-if [[ $(get_config SNAPSHOT_VIDEO) == "yes" ]] ; then
+if [[ $(get_config SNAPSHOT) == "yes" ]] && [[ $(get_config SNAPSHOT_VIDEO) == "yes" ]]; then
     echo "* * * * * /home/yi-hack/script/thumb.sh cron" >> /var/spool/cron/crontabs/root
 fi
 if [ "$FREE_SPACE" != "0" ]; then
@@ -372,6 +398,51 @@ fi
 if [[ $(get_config FTP_UPLOAD) == "yes" ]] ; then
     echo "* * * * * sleep 40; /home/yi-hack/script/ftppush.sh cron" >> /var/spool/cron/crontabs/root
 fi
+if [[ $(get_config TIMELAPSE) == "yes" ]] ; then
+    DT=$(get_config TIMELAPSE_DT)
+    OFF=""
+    CRDT=""
+    if [ "$DT" == "1" ]; then
+        CRDT="* * * * *"
+    elif [ "$DT" == "2" ] || [ "$DT" == "3" ] || [ "$DT" == "4" ] || [ "$DT" == "5" ] || [ "$DT" == "6" ] || [ "$DT" == "10" ] || [ "$DT" == "15" ] || [ "$DT" == "20" ] || [ "$DT" == "30" ]; then
+        CRDT="*/$DT * * * *"
+    elif [ "$DT" == "60" ]; then
+        CRDT="0 * * * *"
+    elif [ "$DT" == "120" ] || [ "$DT" == "180" ] || [ "$DT" == "240" ] || [ "$DT" == "360" ]; then
+        DTF=$(($DT/60))
+        CRDT="* */$DTF * * *"
+    elif [ "$DT" == "1440" ]; then
+        CRDT="0 0 * * *"
+    elif [ "${DT:0:4}" == "1440" ]; then
+        if [ "${DT:4:1}" == "+" ]; then
+            OFF="${DT:5:10}"
+            if [ ! -z $OFF ]; then
+                case $OFF in
+                    ''|*[!0-9]* )
+                        OFF_OK=0;;
+                    * )
+                        OFF_OK=1;;
+                esac
+                if [ "$OFF_OK" == "1" ] && [ $OFF -le 1440 ]; then
+                    OFF_H=$(($OFF/60))
+                    OFF_M=$(($OFF%60))
+                    CRDT="$OFF_M $OFF_H * * *"
+                fi
+            fi
+        fi
+    fi
+    if [[ $(get_config TIMELAPSE_FTP) == "yes" ]] ; then
+        echo "$CRDT sleep 30; /home/yi-hack/script/time_lapse.sh yes" >> /var/spool/cron/crontabs/root
+    else
+        if [ ! -z "$CRDT" ]; then
+            echo "$CRDT sleep 30; /home/yi-hack/script/time_lapse.sh no" >> /var/spool/cron/crontabs/root
+        fi
+        VDT=$(get_config TIMELAPSE_VDT)
+        if [ ! -z "$VDT" ]; then
+            echo "$(get_config TIMELAPSE_VDT) /home/yi-hack/script/create_avi.sh /tmp/sd/record/timelapse 1920x1080 5" >> /var/spool/cron/crontabs/root
+        fi
+    fi
+fi
 /usr/sbin/crond -c /var/spool/cron/crontabs/
 
 # Add MQTT Advertise
@@ -379,6 +450,11 @@ if [ -f "$YI_HACK_PREFIX/script/mqtt_advertise/startup.sh" ]; then
     $YI_HACK_PREFIX/script/mqtt_advertise/startup.sh
 fi
 
+unset TZ
+
+log "Starting custom startup.sh"
 if [ -f "/tmp/sd/yi-hack/startup.sh" ]; then
     /tmp/sd/yi-hack/startup.sh
 fi
+
+log "system.sh completed" 1

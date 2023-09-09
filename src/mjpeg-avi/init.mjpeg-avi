@@ -5,9 +5,8 @@ cd $SCRIPT_DIR
 
 rm -rf ./_install
 
-cd onvif_srvd || exit 1
+cd mjpeg-avi || exit 1
 git reset --hard || exit 1
 
-cd ..
-
-cp Makefile.onvif_srvd onvif_srvd/Makefile
+cp ../create_avi.sh .
+patch -p0 < ../makefile.patch

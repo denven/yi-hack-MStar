@@ -267,9 +267,6 @@ MQTT_RETAIN_MOTION_IMAGE=$(get_config MQTT_RETAIN_MOTION_IMAGE)
 # fi
 CONTENT='{"availability_topic":"'$MQTT_PREFIX'/'$TOPIC_BIRTH_WILL'","payload_available":"'$BIRTH_MSG'","payload_not_available":"'$WILL_MSG'","device":'$DEVICE_DETAILS', "qos": "'$MQTT_QOS'", '$RETAIN' "topic":"'$MQTT_PREFIX'/'$TOPIC_MOTION_IMAGE'","name":"'$UNIQUE_NAME'","unique_id":"'$UNIQUE_ID'", "platform": "mqtt"}'
 mqtt_publish
-# PTZ preset
-hass_setup_number "PTZ_PRESET" "Camera Preset" "numeric" $MQTT_ADV_CAMERA_SETTING_TOPIC 0 7 1 "box" ""
-mqtt_publish
 if [ "$MQTT_ADV_CAMERA_SETTING_ENABLE" == "yes" ]; then
     if [ "$MQTT_ADV_CAMERA_SETTING_RETAIN" == "1" ]; then
         RETAIN='"retain":true, '
@@ -283,6 +280,9 @@ if [ "$MQTT_ADV_CAMERA_SETTING_ENABLE" == "yes" ]; then
     fi
     # Switch On
     hass_setup_switch "SWITCH_ON" "Switch Status" "video" $MQTT_ADV_CAMERA_SETTING_TOPIC "config"
+    mqtt_publish
+    # Save video on motion
+    hass_setup_switch "SAVE_VIDEO_ON_MOTION" "Save video on motion" "content-save" $MQTT_ADV_CAMERA_SETTING_TOPIC "config"
     mqtt_publish
     # Detection sensitivity
     hass_setup_select "SENSITIVITY" "Detection sensitivity" "knob" $MQTT_ADV_CAMERA_SETTING_TOPIC '"low","medium","high"' "config"
